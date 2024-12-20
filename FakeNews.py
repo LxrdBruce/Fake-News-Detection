@@ -6,6 +6,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import matplotlib.pyplot as plt
 import seaborn as sns
 from collections import Counter
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 # Loading the training dataset
 df = pd.read_csv('train.csv')
@@ -38,7 +41,7 @@ print(df[['text', 'tokens']].head())
 df['processed_text'] = df['tokens'].apply(lambda tokens: ' '.join(tokens))
 
 # Initialising TF-IDF Vectorizer
-tfidf_vectorizer = TfidfVectorizer(max_features=5000)  # Adjust max_features as needed
+tfidf_vectorizer = TfidfVectorizer(max_features=5000)
 X = tfidf_vectorizer.fit_transform(df['processed_text'])
 
 # Checking the shape of the TF-IDF matrix
@@ -68,4 +71,34 @@ plt.figure(figsize=(10, 6))
 sns.barplot(x=frequencies, y=words)
 plt.title('Top 20 Most Common Words')
 plt.xlabel('Frequency')
+plt.show()
+
+# Ensuring 'label' column exists
+if 'label' not in df.columns:
+    raise ValueError("Label column not found in the dataset.")
+
+# Split into training and testing sets
+y = df['label']  # Target variable
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+print("Training size:", X_train.shape, "Test size:", X_test.shape)
+
+#  train Naïve Bayes model
+nb_model = MultinomialNB()
+nb_model.fit(X_train, y_train)
+
+# predict on the test set
+y_pred = nb_model.predict(X_test)
+
+# evaluate the model
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(6, 6))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
+plt.title("Confusion Matrix for Naïve Bayes Classifier")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
 plt.show()
