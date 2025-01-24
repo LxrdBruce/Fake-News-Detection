@@ -6,9 +6,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import matplotlib.pyplot as plt
 import seaborn as sns
 from collections import Counter
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.svm import SVC
 
 # Loading the training dataset
 df = pd.read_csv('train.csv')
@@ -83,6 +84,53 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 
 print("Training size:", X_train.shape, "Test size:", X_test.shape)
 
+# Initialise SVM model
+svm_model = SVC(kernel='linear', probability=True, random_state=42)
+
+# Trainining the SVM model
+svm_model.fit(X_train, y_train)
+
+# Predict on the test set
+y_pred_svm = svm_model.predict(X_test)
+
+# Evaluate the SVM model
+print("\nSVM Accuracy:", accuracy_score(y_test, y_pred_svm))
+print("\nSVM Classification Report:\n", classification_report(y_test, y_pred_svm))
+
+# Confusion Matrix for SVM
+cm_svm = confusion_matrix(y_test, y_pred_svm)
+plt.figure(figsize=(6, 6))
+sns.heatmap(cm_svm, annot=True, fmt="d", cmap="Oranges", xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
+plt.title("Confusion Matrix for SVM Classifier")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.show()
+
+# Hyperparameter tuning using GridSearchCV
+param_grid = {'C': [0.1, 1, 10], 'kernel': ['linear', 'rbf']}
+grid_search = GridSearchCV(SVC(probability=True, random_state=42), param_grid, cv=5, scoring='accuracy')
+grid_search.fit(X_train, y_train)
+
+# Best parameters and score
+print("Best SVM Parameters:", grid_search.best_params_)
+print("Best SVM Accuracy on Training Set:", grid_search.best_score_)
+
+# Evaluate the best model
+best_svm_model = grid_search.best_estimator_
+y_pred_best_svm = best_svm_model.predict(X_test)
+print("\nBest SVM Classification Report:\n", classification_report(y_test, y_pred_best_svm))
+
+# Confusion Matrix for the best SVM
+cm_best_svm = confusion_matrix(y_test, y_pred_best_svm)
+plt.figure(figsize=(6, 6))
+sns.heatmap(cm_best_svm, annot=True, fmt="d", cmap="Greens", xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
+plt.title("Confusion Matrix for Best SVM Classifier")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.show()
+
+
+
 #  train Naïve Bayes model
 nb_model = MultinomialNB()
 nb_model.fit(X_train, y_train)
@@ -102,3 +150,8 @@ plt.title("Confusion Matrix for Naïve Bayes Classifier")
 plt.xlabel("Predicted")
 plt.ylabel("Actual")
 plt.show()
+
+print("Comparison of Models:")
+print(f"Naïve Bayes Accuracy: {accuracy_score(y_test, y_pred)}")
+print(f"SVM Accuracy: {accuracy_score(y_test, y_pred_svm)}")
+plt.savefig("svm_confusion_matrix.png")
