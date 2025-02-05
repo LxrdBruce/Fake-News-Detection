@@ -10,6 +10,8 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.svm import SVC
+import re
+from sklearn.dummy import DummyClassifier
 
 # Loading the training dataset
 df = pd.read_csv('train.csv')
@@ -26,52 +28,25 @@ print(df.info())
 
 nltk.download('punkt')
 
-# Tokenising the 'text' column and add a new column 'tokens'
-df['tokens'] = df['text'].apply(word_tokenize)
+def clean_text(text):
+    text = re.sub(r'\W+', ' ', text)  
+    text = re.sub(r'\d+', '', text) 
+    return text.lower().strip()
 
-print(df[['text', 'tokens']].head())
+df['processed_text'] = df['text'].apply(clean_text)
 
-nltk.download('stopwords')
-stop_words = set(stopwords.words('english'))
-
-# Filter out stop words
-df['tokens'] = df['tokens'].apply(lambda tokens: [word for word in tokens if word.lower() not in stop_words])
-print(df[['text', 'tokens']].head())
-
-# Convert the tokens back to full strings
-df['processed_text'] = df['tokens'].apply(lambda tokens: ' '.join(tokens))
-
-# Initialising TF-IDF Vectorizer
-tfidf_vectorizer = TfidfVectorizer(max_features=5000)
-X = tfidf_vectorizer.fit_transform(df['processed_text'])
-
-# Checking the shape of the TF-IDF matrix
-print("TF-IDF matrix shape:", X.shape)
+# Filtering out stopwords
+tfidf_vectorizer = TfidfVectorizer(
+    max_features=5000,
+    stop_words='english',
+    ngram_range=(1, 2),  
+    max_df=0.9, 
+    min_df=2 
+)
 
 # Class Balance Check
 sns.countplot(x='label', data=df)
 plt.title('Class Balance: Fake (1) vs Real (0)')
-plt.show()
-
-# Token Count Distribution
-df['token_count'] = df['tokens'].apply(len)
-sns.histplot(df['token_count'], bins=30)
-plt.title('Distribution of Token Counts per Article')
-plt.xlabel('Token Count')
-plt.ylabel('Frequency')
-plt.show()
-
-# Flatten list of all tokens there
-all_words = [word for tokens in df['tokens'] for word in tokens]
-word_freq = Counter(all_words)
-
-common_words = word_freq.most_common(20)
-words, frequencies = zip(*common_words)
-
-plt.figure(figsize=(10, 6))
-sns.barplot(x=frequencies, y=words)
-plt.title('Top 20 Most Common Words')
-plt.xlabel('Frequency')
 plt.show()
 
 # Ensuring 'label' column exists
@@ -79,10 +54,20 @@ if 'label' not in df.columns:
     raise ValueError("Label column not found in the dataset.")
 
 # Split into training and testing sets
-y = df['label']  # Target variable
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+y = df['label']
+X_train, X_test, y_train, y_test = train_test_split(df['processed_text'], df['label'], test_size=0.2, random_state=42)
+
+X_train = tfidf_vectorizer.fit_transform(X_train)
+X_test = tfidf_vectorizer.transform(X_test)
+
 
 print("Training size:", X_train.shape, "Test size:", X_test.shape)
+
+dummy_clf = DummyClassifier(strategy="most_frequent")
+dummy_clf.fit(X_train, y_train)
+dummy_pred = dummy_clf.predict(X_test)
+
+print("Baseline Dummy Classifier Accuracy:", accuracy_score(y_test, dummy_pred))
 
 # Initialise SVM model
 svm_model = SVC(kernel='linear', probability=True, random_state=42)
@@ -97,10 +82,13 @@ y_pred_svm = svm_model.predict(X_test)
 print("\nSVM Accuracy:", accuracy_score(y_test, y_pred_svm))
 print("\nSVM Classification Report:\n", classification_report(y_test, y_pred_svm))
 
+
+labels = list(set(y_test)) 
+
 # Confusion Matrix for SVM
 cm_svm = confusion_matrix(y_test, y_pred_svm)
 plt.figure(figsize=(6, 6))
-sns.heatmap(cm_svm, annot=True, fmt="d", cmap="Oranges", xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
+sns.heatmap(cm_svm, annot=True, fmt="d", cmap="Oranges", xticklabels=labels, yticklabels=labels)
 plt.title("Confusion Matrix for SVM Classifier")
 plt.xlabel("Predicted")
 plt.ylabel("Actual")
@@ -123,7 +111,7 @@ print("\nBest SVM Classification Report:\n", classification_report(y_test, y_pre
 # Confusion Matrix for the best SVM
 cm_best_svm = confusion_matrix(y_test, y_pred_best_svm)
 plt.figure(figsize=(6, 6))
-sns.heatmap(cm_best_svm, annot=True, fmt="d", cmap="Greens", xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
+sns.heatmap(cm_best_svm, annot=True, fmt="d", cmap="Greens", xticklabels=labels, yticklabels=labels)
 plt.title("Confusion Matrix for Best SVM Classifier")
 plt.xlabel("Predicted")
 plt.ylabel("Actual")
@@ -145,7 +133,7 @@ print("\nClassification Report:\n", classification_report(y_test, y_pred))
 # Confusion Matrix
 cm = confusion_matrix(y_test, y_pred)
 plt.figure(figsize=(6, 6))
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=labels, yticklabels=labels)
 plt.title("Confusion Matrix for Naïve Bayes Classifier")
 plt.xlabel("Predicted")
 plt.ylabel("Actual")
