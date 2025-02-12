@@ -82,6 +82,8 @@ y_pred_svm = svm_model.predict(X_test)
 print("\nSVM Accuracy:", accuracy_score(y_test, y_pred_svm))
 print("\nSVM Classification Report:\n", classification_report(y_test, y_pred_svm))
 
+print(f"Length of y_test: {len(y_test)}")
+
 
 labels = list(set(y_test)) 
 
@@ -95,8 +97,16 @@ plt.ylabel("Actual")
 plt.show()
 
 # Hyperparameter tuning using GridSearchCV
-param_grid = {'C': [0.1, 1, 10], 'kernel': ['linear', 'rbf']}
-grid_search = GridSearchCV(SVC(probability=True, random_state=42), param_grid, cv=5, scoring='accuracy')
+param_grid = {'C': [1], 'kernel': ['linear']}
+grid_search = GridSearchCV(
+    SVC(probability=True, random_state=42),
+    param_grid,
+    cv=3,
+    scoring='accuracy',
+    n_jobs=-1, 
+    verbose=3 
+)
+
 grid_search.fit(X_train, y_train)
 
 # Best parameters and score
