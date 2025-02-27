@@ -9,7 +9,7 @@ import seaborn as sns
 from collections import Counter
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_curve, auc, precision_recall_curve
 from sklearn.svm import SVC
 import re
 from sklearn.dummy import DummyClassifier
@@ -35,6 +35,33 @@ df['author'] = df['author'].fillna('Unknown')
 print(df.info())
 
 nltk.download('punkt')
+
+def plot_roc_pr_curves(model_name, y_test, y_probs):
+    """Plots ROC and Precision-Recall curves for a given model."""
+    # ROC Curve
+    fpr, tpr, _ = roc_curve(y_test, y_probs)
+    roc_auc = auc(fpr, tpr)
+
+    # Precision-Recall Curve
+    precision, recall, _ = precision_recall_curve(y_test, y_probs)
+
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(fpr, tpr, color="blue", lw=2, label=f"ROC curve (area = {roc_auc:.2f})")
+    plt.plot([0, 1], [0, 1], color="grey", linestyle="--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title(f"ROC Curve - {model_name}")
+    plt.legend(loc="lower right")
+
+    plt.subplot(1, 2, 2)
+    plt.plot(recall, precision, color="red", lw=2)
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title(f"Precision-Recall Curve - {model_name}")
+
+    plt.show()
+
 
 def clean_text(text):
     text = re.sub(r'\W+', ' ', text)  
@@ -73,15 +100,15 @@ tokenizer = Tokenizer(num_words=MAX_NB_WORDS, lower=True)
 tokenizer.fit_on_texts(df['processed_text'])
 
 # Convert text to sequences
-X_train_seq = tokenizer.texts_to_sequences(X_train)
-X_test_seq = tokenizer.texts_to_sequences(X_test)
+X_train_seq = [seq if len(seq) > 0 else [0] for seq in tokenizer.texts_to_sequences(X_train)]
+X_test_seq = [seq if len(seq) > 0 else [0] for seq in tokenizer.texts_to_sequences(X_test)]
 
 # Pad sequences
 X_train_pad = pad_sequences(X_train_seq, maxlen=MAX_SEQUENCE_LENGTH)
 X_test_pad = pad_sequences(X_test_seq, maxlen=MAX_SEQUENCE_LENGTH)
 
-X_train_tfidf = tfidf_vectorizer.fit_transform(df['processed_text'][X_train.index])
-X_test_tfidf = tfidf_vectorizer.transform(df['processed_text'][X_test.index])
+X_train_tfidf = tfidf_vectorizer.fit_transform(X_train)
+X_test_tfidf = tfidf_vectorizer.transform(X_test) 
 
 print("TF-IDF Training size:", X_train_tfidf.shape, "Test size:", X_test_tfidf.shape)
 print("LSTM Training size:", X_train_pad.shape, "Test size:", X_test_pad.shape)
@@ -109,7 +136,8 @@ print("\nSVM Classification Report:\n", classification_report(y_test, y_pred_svm
 print(f"Length of y_test: {len(y_test)}")
 
 
-labels = list(set(y_test)) 
+labels = ["Real", "Fake"]
+
 
 # Confusion Matrix for SVM
 cm_svm = confusion_matrix(y_test, y_pred_svm)
@@ -141,7 +169,9 @@ print("Best SVM Accuracy on Training Set:", grid_search.best_score_)
 # Evaluate the best model
 best_svm_model = grid_search.best_estimator_
 y_pred_best_svm = best_svm_model.predict(X_test_tfidf)
+y_probs_svm = best_svm_model.predict_proba(X_test_tfidf)[:, 1]
 print("\nBest SVM Classification Report:\n", classification_report(y_test, y_pred_best_svm))
+plot_roc_pr_curves("SVM", y_test, y_probs_svm)
 
 # Confusion Matrix for the best SVM
 cm_best_svm = confusion_matrix(y_test, y_pred_best_svm)
@@ -175,6 +205,10 @@ history_lstm = model_lstm.fit(X_train_pad, y_train, epochs=5, batch_size=64, val
 lstm_loss, lstm_acc = model_lstm.evaluate(X_test_pad, y_test)
 print("\nLSTM Accuracy:", lstm_acc)
 
+y_probs_lstm = model_lstm.predict(X_test_pad).flatten()
+
+plot_roc_pr_curves("LSTM", y_test, y_probs_lstm)
+
 # LSTM Classification Report
 y_pred_lstm = (model_lstm.predict(X_test_pad) > 0.5).astype("int32")
 
@@ -197,6 +231,7 @@ nb_model.fit(X_train_tfidf, y_train)
 
 # predict on the test set
 y_pred = nb_model.predict(X_test_tfidf)
+y_probs = nb_model.predict_proba(X_test_tfidf)[:, 1]
 
 # evaluate the model
 print("Accuracy:", accuracy_score(y_test, y_pred))
@@ -210,6 +245,8 @@ plt.title("Confusion Matrix for Naïve Bayes Classifier")
 plt.xlabel("Predicted")
 plt.ylabel("Actual")
 plt.show()
+
+plot_roc_pr_curves("Naïve Bayes", y_test, y_probs)
 
 print("Comparison of Models:")
 print(f"Naïve Bayes Accuracy: {accuracy_score(y_test, y_pred)}")
