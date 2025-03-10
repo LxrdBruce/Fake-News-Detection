@@ -12,6 +12,8 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_curve, auc, precision_recall_curve
 from sklearn.svm import SVC
 import re
+import os
+os.environ["WANDB_DISABLED"] = "true"
 from sklearn.dummy import DummyClassifier
 import numpy as np
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -19,6 +21,11 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout, SpatialDropout1D
 from tensorflow.keras.optimizers import Adam
+from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
+from torch.utils.data import Dataset, DataLoader
+import torch
+
+
 
 
 # Loading the training dataset
@@ -36,13 +43,22 @@ print(df.info())
 
 nltk.download('punkt')
 
+# Load BERT tokeniser and model
+MODEL_NAME = "bert-base-uncased"
+tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
+model = BertForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+
+
+
 def plot_roc_pr_curves(model_name, y_test, y_probs):
     """Plots ROC and Precision-Recall curves for a given model."""
     # ROC Curve
     fpr, tpr, _ = roc_curve(y_test, y_probs)
     roc_auc = auc(fpr, tpr)
 
-    # Precision-Recall Curve
+    
     precision, recall, _ = precision_recall_curve(y_test, y_probs)
 
     plt.figure(figsize=(12, 5))
@@ -79,6 +95,35 @@ tfidf_vectorizer = TfidfVectorizer(
     min_df=2 
 )
 
+class FakeNewsDataset(Dataset):
+    def __init__(self, texts, labels, tokenizer, max_length=256):
+        self.texts = texts
+        self.labels = labels
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+    def __len__(self):
+        return len(self.texts)
+
+    def __getitem__(self, idx):
+        text = str(self.texts[idx])
+        label = self.labels[idx]
+        
+        encoding = self.tokenizer(
+            text,
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt"
+        )
+
+        return {
+            "input_ids": encoding["input_ids"].squeeze(),
+            "attention_mask": encoding["attention_mask"].squeeze(),
+            "labels": torch.tensor(label, dtype=torch.long)
+        }
+
+
 # Class Balance Check
 sns.countplot(x='label', data=df)
 plt.title('Class Balance: Fake (1) vs Real (0)')
@@ -96,19 +141,109 @@ X_train, X_test, y_train, y_test = train_test_split(df['processed_text'], df['la
 MAX_NB_WORDS = 20000
 MAX_SEQUENCE_LENGTH = 500 
 
-tokenizer = Tokenizer(num_words=MAX_NB_WORDS, lower=True)
-tokenizer.fit_on_texts(df['processed_text'])
+tokenizer_lstm = Tokenizer(num_words=MAX_NB_WORDS, lower=True)
+tokenizer_lstm.fit_on_texts(df['processed_text'])
 
 # Convert text to sequences
-X_train_seq = [seq if len(seq) > 0 else [0] for seq in tokenizer.texts_to_sequences(X_train)]
-X_test_seq = [seq if len(seq) > 0 else [0] for seq in tokenizer.texts_to_sequences(X_test)]
+X_train_seq = [seq if len(seq) > 0 else [0] for seq in tokenizer_lstm.texts_to_sequences(X_train)]
+X_test_seq = [seq if len(seq) > 0 else [0] for seq in tokenizer_lstm.texts_to_sequences(X_test)]
+
 
 # Pad sequences
 X_train_pad = pad_sequences(X_train_seq, maxlen=MAX_SEQUENCE_LENGTH)
 X_test_pad = pad_sequences(X_test_seq, maxlen=MAX_SEQUENCE_LENGTH)
 
 X_train_tfidf = tfidf_vectorizer.fit_transform(X_train)
-X_test_tfidf = tfidf_vectorizer.transform(X_test) 
+X_test_tfidf = tfidf_vectorizer.transform(X_test)
+
+# Prepare Data for BERT
+train_labels = torch.tensor(y_train.tolist(), dtype=torch.long)
+test_labels = torch.tensor(y_test.tolist(), dtype=torch.long)
+
+train_dataset = FakeNewsDataset(X_train.tolist(), train_labels, tokenizer)
+test_dataset = FakeNewsDataset(X_test.tolist(), test_labels, tokenizer)
+
+train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+test_dataloader = DataLoader(test_dataset, batch_size=1)
+
+
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=1)
+    labels = labels.cpu().numpy() if isinstance(labels, torch.Tensor) else labels
+    preds = preds.cpu().numpy() if isinstance(preds, torch.Tensor) else preds
+    accuracy = accuracy_score(labels, preds)
+    return {"accuracy": accuracy}
+
+
+
+training_args = TrainingArguments(
+    output_dir="./bert_results",
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    logging_dir="./bert_logs",
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
+    gradient_accumulation_steps=4,
+    num_train_epochs=3, 
+    weight_decay=0.01,
+    fp16=True
+    
+    
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=test_dataset,
+    compute_metrics=compute_metrics
+)
+
+
+# Train BERT
+print("\nTraining BERT Model...")
+trainer.train()
+
+print("\nEvaluating BERT Model...")
+bert_eval_results = trainer.evaluate()
+print("BERT Evaluation Results:", bert_eval_results)
+
+def plot_bert_roc_pr_curves(trainer, dataset, model_name="BERT"):
+    predictions = trainer.predict(dataset)
+    y_probs = torch.nn.functional.softmax(torch.tensor(predictions.predictions), dim=1)[:, 1].cpu().numpy()
+    y_test = np.array([example["labels"].item() for example in dataset])
+
+
+    # ROC Curve
+    fpr, tpr, _ = roc_curve(y_test, y_probs)
+    roc_auc = auc(fpr, tpr)
+
+    # Precision-Recall Curve
+    precision, recall, _ = precision_recall_curve(y_test, y_probs)
+
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(fpr, tpr, color="blue", lw=2, label=f"ROC curve (area = {roc_auc:.2f})")
+    plt.plot([0, 1], [0, 1], color="grey", linestyle="--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title(f"ROC Curve - {model_name}")
+    plt.legend(loc="lower right")
+
+    plt.subplot(1, 2, 2)
+    plt.plot(recall, precision, color="red", lw=2)
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title(f"Precision-Recall Curve - {model_name}")
+
+    plt.show()
+
+# Call the function to plot BERT's ROC and PR curves
+plot_bert_roc_pr_curves(trainer, test_dataset)
+
+
+
 
 print("TF-IDF Training size:", X_train_tfidf.shape, "Test size:", X_test_tfidf.shape)
 print("LSTM Training size:", X_train_pad.shape, "Test size:", X_test_pad.shape)
@@ -252,4 +387,6 @@ print("Comparison of Models:")
 print(f"Naïve Bayes Accuracy: {accuracy_score(y_test, y_pred)}")
 print(f"SVM Accuracy: {accuracy_score(y_test, y_pred_svm)}")
 print(f"LSTM Accuracy: {lstm_acc}")
+bert_accuracy = bert_eval_results.get("eval_accuracy", "N/A")
+print(f"BERT Accuracy: {bert_accuracy}")
 plt.savefig("svm_confusion_matrix.png")
