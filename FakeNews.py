@@ -52,7 +52,7 @@ print(df.info())
 
 nltk.download('punkt')
 
-# Load BERT tokeniser and model
+# Load BERT tokenizer and model
 MODEL_NAME = "bert-base-uncased"
 tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
 model = BertForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2, ignore_mismatched_sizes=True)
