@@ -1,10 +1,10 @@
-📰 Fake News Detection System
+Fake News Detection System
 
 A machine learning application that classifies news articles as **Real** or **Fake** using a fine-tuned BERT model. Built with Python, Hugging Face Transformers, and Streamlit.
 
 ---
 
-## 🔧 1. Install Dependencies
+1. Install Dependencies
 
 Install the required libraries:
 
